@@ -131,16 +131,13 @@ class Model(nn.Module):
         self.future_gate = None
         self.future_exog_proj = None
         self.future_exog_gate = None
-        self.future_exog_ch_proj = None  # NEW: per-channel projection
-        self.future_exog_ch_emb = None   # NEW: per-channel learned embedding
+        self.future_exog_ch_proj = None
+        self.future_exog_ch_emb = None
         self.fusion_alpha_logit = None
         self.future_adapter = None
         self.exog_dim = 0
         self._fusion_initialized = False
 
-    # ------------------------------------------------------------------
-    # init_fusion_components — adds future_exog_ch_proj
-    # ------------------------------------------------------------------
     def init_fusion_components(self, exog_dim, alpha_init=0.0):
         if self._fusion_initialized or exog_dim <= 0:
             self._fusion_initialized = True
@@ -148,13 +145,11 @@ class Model(nn.Module):
 
         device = next(self.parameters()).device
 
-        # gated_overwrite branch (same as original)
         self.future_gate = nn.Sequential(
             nn.Linear(exog_dim * 2, exog_dim),
             nn.Sigmoid(),
         ).to(device)
 
-        # embedding_concat branch (same as original)
         self.future_exog_proj = nn.Sequential(
             nn.Linear(exog_dim, self.d_model),
             nn.GELU(),
@@ -165,22 +160,14 @@ class Model(nn.Module):
             nn.Sigmoid(),
         ).to(device)
 
-        # NEW: per-channel future modulation
-        # Instead of broadcasting the same future vector to all channels,
-        # each channel has a learned embedding that modulates the projected
-        # future info differently. This preserves channel diversity for CD.
-        # We use a generous max_channels bound; at runtime we slice to the
-        # actual channel count from x_enc_emb.shape[1].
-        max_channels = 32  # upper bound for any realistic channel count
+        max_channels = 32
         self.future_exog_ch_emb = nn.Parameter(
             torch.randn(max_channels, self.d_model, device=device) * 0.02
         )
         self.future_exog_ch_proj = nn.Linear(self.d_model, self.d_model).to(device)
 
-        # Learnable fusion weight (same as original)
         self.fusion_alpha_logit = nn.Parameter(torch.tensor(float(alpha_init), device=device))
 
-        # Future adapter (same as original)
         self.future_adapter = nn.Sequential(
             nn.Linear(exog_dim, self.d_model),
             nn.GELU(),
@@ -191,9 +178,6 @@ class Model(nn.Module):
         self.exog_dim = exog_dim
         self._fusion_initialized = True
 
-    # ------------------------------------------------------------------
-    # _path2_embedding_enhance — per-channel injection (KEY CHANGE)
-    # ------------------------------------------------------------------
     def _path2_embedding_enhance(self, x_enc_emb, exog_future):
         """Branch 2: per-channel future exog injection.
 
@@ -208,18 +192,13 @@ class Model(nn.Module):
         fut_emb = self.future_exog_proj(exog_future)
         fut_emb_mean = fut_emb.mean(dim=1)  # (B, d_model)
 
-        # Per-channel modulation: project future info, then modulate by
-        # a learned per-channel embedding so each channel responds differently
         if self.future_exog_ch_proj is not None and self.future_exog_ch_emb is not None:
             fut_projected = self.future_exog_ch_proj(fut_emb_mean)  # (B, d_model)
             C_total = x_enc_emb.shape[1]  # actual channels in embedding
             ch_emb = self.future_exog_ch_emb[:C_total]  # (C_total, d_model)
-            # Modulate: each channel gets a unique combination of future info
             fut_per_ch = fut_projected.unsqueeze(1) * ch_emb.unsqueeze(0)  # (B, C, d_model)
-            # Expand across patches: (B, C, 1, d_model) -> (B, C, num_p, d_model)
             fut_per_ch = fut_per_ch.unsqueeze(2).expand_as(x_enc_emb)
         else:
-            # Fallback to original broadcast if ch_proj not initialized
             fut_per_ch = fut_emb_mean
             for _ in range(x_enc_emb.ndim - 2):
                 fut_per_ch = fut_per_ch.unsqueeze(1)
@@ -235,9 +214,6 @@ class Model(nn.Module):
 
         return x_enc_emb
 
-    # ------------------------------------------------------------------
-    # All methods below are identical to the original Model
-    # ------------------------------------------------------------------
     def build_temporal_encoder(self, configs):
         use_period_norm = getattr(configs, "use_period_norm", True)
         return IntAttention(

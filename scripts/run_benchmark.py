@@ -144,7 +144,6 @@ if __name__ == "__main__":
         description="run_benchmark",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    # script name
     parser.add_argument(
         "--config-path",
         type=str,
@@ -169,7 +168,6 @@ if __name__ == "__main__":
         "only takes effect when data_name_list is not specified",
     )
 
-    # model_config
     parser.add_argument(
         "--adapter",
         type=str,
@@ -196,7 +194,6 @@ if __name__ == "__main__":
         ),
     )
 
-    # evaluation_config
     parser.add_argument(
         "--metrics",
         type=str,
@@ -228,7 +225,6 @@ if __name__ == "__main__":
         "'none': No deterministic behavior is applied.",
     )
 
-    # evaluation engine
     parser.add_argument(
         "--eval-backend",
         type=str,
@@ -269,7 +265,6 @@ if __name__ == "__main__":
         help="Max tasks to run on a single worker when using parallel backends",
     )
 
-    # report_config
     parser.add_argument(
         "--aggregate_type",
         default="mean",

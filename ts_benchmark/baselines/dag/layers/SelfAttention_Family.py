@@ -69,7 +69,6 @@ class FullAttention(nn.Module):
 
         A_before_dropout = torch.softmax(scale * scores, dim=-1)
         if exog_attn is not None:
-            # A_before_dropout = (1.0 - attn_alpha) * A_before_dropout + attn_alpha * exog_attn TODO
             A_before_dropout = A_before_dropout + attn_alpha * exog_attn
             A_before_dropout = torch.softmax(A_before_dropout, dim=-1)
         A = self.dropout(A_before_dropout)
@@ -120,7 +119,6 @@ class ProbAttention(nn.Module):
     def _get_initial_context(self, V, L_Q):
         B, H, L_V, D = V.shape
         if not self.mask_flag:
-            # V_sum = V.sum(dim=-2)
             V_sum = V.mean(dim=-2)
             contex = V_sum.unsqueeze(-2).expand(B, H,
                                                 L_Q, V_sum.shape[-1]).clone()

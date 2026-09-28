@@ -52,10 +52,6 @@ class CovCausalityEncoder(nn.Module):
         self.exog_dim = enc_in - series_dim
 
         self.criterion = criterion
-        # Embedding
-        # self.history_enc_embedding = DataEmbedding_inverted(seq_len, d_model, dropout)
-        # self.future_enc_embedding = DataEmbedding_inverted(pred_len, d_model, dropout)
-
         self.history_enc_embedding = DataEmbedding(seq_len, self.exog_dim, d_model, dropout)
         self.future_enc_embedding = DataEmbedding(pred_len, self.exog_dim, d_model, dropout)
 
@@ -71,14 +67,10 @@ class CovCausalityEncoder(nn.Module):
 
         self.history_exog_projector = CompressAndProject(self.exog_dim, self.seq_len, d_model)
         self.future_exog_projector = CompressAndProject(self.exog_dim, self.pred_len, d_model)
-        # self.attn_alpha_raw = nn.Parameter(torch.tensor(-1.0))
-
         self.history_projection = ExogProjector(enc_in - series_dim, 1, d_model, seq_len)
         self.future_projection = ExogProjector(enc_in - series_dim, 1, d_model, pred_len)
 
     def forward(self, x, exog_future, use_exog=True):
-        # Normalization from Non-stationary Transformer
-
         # TODO Try removing normalization and denormalization
         exog_history = x[:, :, self.series_dim:]
         x_history = x[:, :, :self.series_dim]

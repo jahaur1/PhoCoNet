@@ -17,7 +17,6 @@ from ts_benchmark.baselines.time_series_library.layers.SelfAttention_Family impo
 
 
 def adjust_learning_rate(optimizer, epoch, args):
-    # lr = args.learning_rate * (0.2 ** (epoch // 2))
     if args.lradj == "type1":
         lr_adjust = {epoch: args.lr * (0.5 ** ((epoch - 1) // 1))}
     elif args.lradj == "type2":
@@ -203,7 +202,6 @@ class SlidingWindowDataLoader:
             batch_targets.append(targets)
             self.current_index += 1
 
-        # Convert NumPy array to PyTorch tensor
         batch_inputs = torch.tensor(batch_inputs, dtype=torch.float32)
         batch_targets = torch.tensor(batch_targets, dtype=torch.float32)
 
@@ -326,8 +324,6 @@ class DatasetForTransformer:
         timeenc: int = 1,
         freq: str = "h",
     ):
-        # init
-
         self.dataset = dataset
         self.history_length = history_len
         self.prediction_length = prediction_len

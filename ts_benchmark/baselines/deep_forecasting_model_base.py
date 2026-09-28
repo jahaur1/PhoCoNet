@@ -82,7 +82,6 @@ class DeepForecastingModelBase(ModelBase):
     def __init__(self, model_config, **kwargs):
         super(DeepForecastingModelBase, self).__init__()
         self.config = Config(model_config, **kwargs)
-        # self.scaler = StandardScaler()
         self.scaler1 = StandardScaler()
         self.scaler2 = StandardScaler()
         self.seq_len = self.config.seq_len
@@ -296,7 +295,6 @@ class DeepForecastingModelBase(ModelBase):
         time_column_data = test.index
         data_colums = test.columns
         start = time_column_data[-1]
-        # padding_zero = [0] * (self.config.horizon + 1)
         date = pd.date_range(
             start=start, periods=self.config.horizon + 1, freq=self.config.freq.upper()
         )
@@ -449,14 +447,9 @@ class DeepForecastingModelBase(ModelBase):
             train_valid_data, train_ratio_in_tv, config.seq_len
         )
 
-        # Fit two scalers separately
         if exog_dim > 0:
-            # Fit scaler1 for series data
             self.scaler1.fit(train_data.values[:, :series_dim])
-            # Fit scaler2 for exog data
             self.scaler2.fit(train_data.values[:, series_dim:])
-
-            # self.scaler.fit(train_data.values)
 
             if config.norm:
                 scaled_series = self.scaler1.transform(
@@ -465,13 +458,11 @@ class DeepForecastingModelBase(ModelBase):
                 scaled_exog = self.scaler2.transform(train_data.values[:, series_dim:])
                 final_train_data = np.concatenate((scaled_series, scaled_exog), axis=1)
                 train_data = pd.DataFrame(
-                    # self.scaler.transform(train_data.values),
                     final_train_data,
                     columns=train_data.columns,
                     index=train_data.index,
                 )
         else:
-            # Only series data, use scaler1
             self.scaler1.fit(train_data.values)
             if config.norm:
                 train_data = pd.DataFrame(
@@ -520,7 +511,6 @@ class DeepForecastingModelBase(ModelBase):
             shuffle=True,
             drop_last=train_drop_last,
         )
-        # Define optimizer
         optimizer = self._init_optimizer(CovariateFusion=self.CovariateFusion)
 
         if config.use_amp == 1:
@@ -567,7 +557,6 @@ class DeepForecastingModelBase(ModelBase):
             self.model.train()
             if self.CovariateFusion is not None:
                 self.CovariateFusion.train()
-            # for input, target, input_mark, target_mark in train_data_loader:
             for i, (input, target, input_mark, target_mark) in enumerate(
                 self.train_data_loader
             ):
@@ -578,7 +567,6 @@ class DeepForecastingModelBase(ModelBase):
                     input_mark.to(device),
                     target_mark.to(device),
                 )
-                # decoder input
                 exog_future = target[:, -config.horizon :, series_dim:].to(device)
                 out_loss = self._process(
                     input, target, input_mark, target_mark, exog_future
@@ -599,8 +587,6 @@ class DeepForecastingModelBase(ModelBase):
                 output, target = self._post_process(output, target)
 
                 loss = criterion(output, target)
-                # print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
-
                 total_loss = loss + additional_loss
 
                 if config.use_amp == 1:
@@ -693,19 +679,15 @@ class DeepForecastingModelBase(ModelBase):
 
         if self.config.norm:
             if exog_data is not None:
-                # scaler series data with scaler1
                 series_values = series.values
                 scaled_series = self.scaler1.transform(series_values)
 
-                # scaler exog data with scaler2
                 exog_values = exog_data.values
                 scaled_exog = self.scaler2.transform(exog_values)
 
-                # Ensure the time span length of target columns and covariate columns are consistent
                 diff = scaled_exog.shape[0] - scaled_series.shape[0]
                 if diff > 0:
                     scaled_series = np.pad(scaled_series, ((0, diff), (0, 0)), mode="constant")
-                # Combine scaled data
                 scaled_values = np.concatenate([scaled_series, scaled_exog], axis=1)
                 series = pd.DataFrame(
                     scaled_values,
@@ -722,7 +704,6 @@ class DeepForecastingModelBase(ModelBase):
         if self.model is None:
             raise ValueError("Model not trained. Call the fit() function first.")
 
-        # seq_len=1440; horizon:672; sum=2112
         config = self.config
         _, test = split_time(series, len(series) - config.seq_len - horizon)
 
@@ -779,7 +760,6 @@ class DeepForecastingModelBase(ModelBase):
                     test.iloc[i + config.seq_len, :series_dim] = output[0, i, :]
 
                 test = test.iloc[config.horizon:]
-                # 2112-336=1776
                 test = self.padding_data_for_forecast(test)
 
                 test_data_set, test_data_loader = forecasting_data_provider(
@@ -841,14 +821,12 @@ class DeepForecastingModelBase(ModelBase):
             exog_dim = 0
         if self.config.norm:
             if exog_dim > 0:
-                # Scale series data with scaler1
                 series_data = input_np[..., :series_dim]
                 origin_shape1 = series_data.shape
                 flattened_data = series_data.reshape((-1, series_data.shape[-1]))
                 series_data = self.scaler1.transform(flattened_data).reshape(
                     origin_shape1
                 )
-                # Scale exog data with scaler2
                 exog_data = input_np[..., series_dim:]
                 origin_shape2 = exog_data.shape
                 flattened_data = exog_data.reshape((-1, exog_data.shape[-1]))
@@ -862,7 +840,6 @@ class DeepForecastingModelBase(ModelBase):
                 flattened_data = input_np.reshape((-1, input_np.shape[-1]))
                 input_np = self.scaler1.transform(flattened_data).reshape(origin_shape)
 
-        # Pass exog_futures, corresponding future covariates for each batch
         if exog_futures is not None:
             exog_future = torch.tensor(
                 exog_futures[i * batch_size : (i + 1) * batch_size, -horizon:, :]

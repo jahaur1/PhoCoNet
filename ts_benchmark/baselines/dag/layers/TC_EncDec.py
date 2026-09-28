@@ -34,10 +34,6 @@ class TemporalCausalityEncoder(nn.Module):
         self.criterion = criterion
         padding = stride
 
-        # self.patch_embedding = PatchEmbedding(
-        #     d_model, patch_len, stride, padding, dropout
-        # )
-
         self.exog_patch_embedding = PatchEmbedding(
             d_model, patch_len, stride, padding, dropout
         )
@@ -59,13 +55,6 @@ class TemporalCausalityEncoder(nn.Module):
 
         # Prediction Head
         self.head_nf = d_model * int((seq_len - patch_len) / stride + 2)
-        # self.head = FlattenHead(
-        #     enc_in,
-        #     self.head_nf,
-        #     pred_len,
-        #     head_dropout=dropout,
-        # )
-
         self.exog_head = FlattenHead(
             enc_in,
             self.head_nf,
@@ -98,9 +87,6 @@ class TemporalCausalityEncoder(nn.Module):
         exog_history = exog_history.permute(0, 2, 1)
         x_history = x_history.permute(0, 2, 1)
 
-        # patch_exog, exog_vars = self.patch_embedding(exog_history)
-        # patch_x, x_vars = self.patch_embedding(x_history)
-
         patch_exog, exog_vars = self.exog_patch_embedding(exog_history)
         patch_x, x_vars = self.x_patch_embedding(x_history)
 
@@ -118,7 +104,6 @@ class TemporalCausalityEncoder(nn.Module):
 
         attn_alpha = F.sigmoid(torch.einsum('bd,bd->b', x_history_projection, exog_history_projection)).view(-1, 1, 1,
                                                                                                              1)
-        # print("tc attn_alpha mean:", torch.mean(attn_alpha))
         enc_x_out, _ = self.encoder_x(patch_x, exog_attns=causality_attns,
                                       attn_alpha=attn_alpha.repeat(self.series_dim, 1, 1, 1))
 
@@ -128,13 +113,6 @@ class TemporalCausalityEncoder(nn.Module):
         enc_x_out = torch.reshape(
             enc_x_out, (-1, x_vars, enc_x_out.shape[-2], enc_x_out.shape[-1])
         ).permute(0, 1, 3, 2)
-
-        # enc_out = torch.cat([enc_x_out, enc_exog_out], dim=1)
-        # out = self.head(enc_out)
-        # out = out.permute(0, 2, 1)
-        #
-        # exog_out = out[:, :, self.series_dim:]
-        # x_out = out[:, :, :self.series_dim]
 
         exog_out = self.exog_head(enc_exog_out)
         x_out = self.x_head(enc_x_out)

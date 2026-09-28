@@ -24,7 +24,6 @@ class ResBlock(nn.Module):
         self.fc3 = nn.Linear(input_dim, output_dim, bias=bias)
         self.dropout = nn.Dropout(dropout)
         self.relu = nn.ReLU()
-        # self.ln = LayerNorm(output_dim, bias=bias)
         self.ln = nn.Identity() if output_dim == 1 else LayerNorm(output_dim, bias=bias)
 
     def forward(self, x):

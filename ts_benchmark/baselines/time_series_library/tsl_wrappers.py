@@ -20,9 +20,7 @@ import torch as _torch_mod
 import torch.nn as nn
 
 
-# ---------------------------------------------------------------------------
 # Hyper-parameter defaults shared by every TSL model.
-# ---------------------------------------------------------------------------
 def _tsl_hyper_params() -> dict:
     """Default TSL hyper-parameters, expressed in TSL field names.
 
@@ -148,9 +146,7 @@ def _get_base():
     return _TSLBase
 
 
-# ---------------------------------------------------------------------------
 # Per-model overrides.
-# ---------------------------------------------------------------------------
 def _series_dim_default() -> int:
     """The number of target columns.  The framework treats the entire input
     matrix as the ``series``, so we treat the first column as the target and
@@ -237,7 +233,6 @@ def get_class(name: str) -> Type[nn.Module]:
 
             return self._tsl_class(self.config)
 
-        # ---------- per-model _process overrides ----------
         def _process(self, input, target, input_mark, target_mark, exog_future=None):
             """Default processing path (DLinear / Informer / FEDformer / TFT).
 
@@ -260,10 +255,8 @@ def get_class(name: str) -> Type[nn.Module]:
             )
             return {"output": out}
 
-    # -----------------------------------------------------------------
     # TiDE: needs to physically split the input into target + exogenous
     # columns and rebuild a time-mark tensor that spans seq_len + pred_len.
-    # -----------------------------------------------------------------
     if name == "TiDE":
         from ts_benchmark.baselines.time_series_library.models import TiDE as _TiDE
 
@@ -281,8 +274,6 @@ def get_class(name: str) -> Type[nn.Module]:
                 kwargs.setdefault("covariate_dim", 4)
                 kwargs.setdefault("d_model", 64)
                 kwargs.setdefault("d_ff", 64)
-                # For our use case the model outputs a single channel
-                # (target).
                 kwargs.setdefault("c_out", 1)
                 super().__init__(**kwargs)
 
@@ -292,12 +283,9 @@ def get_class(name: str) -> Type[nn.Module]:
                     and hasattr(self.config, "horizon")
                 ):
                     self.config.pred_len = self.config.horizon
-                # Adjust covariate_dim to match the actual number of exog
-                # columns (enc_in - target).
                 series_dim = _series_dim_default()
                 enc_in = getattr(self.config, "enc_in", 6) or 6
                 self.config.covariate_dim = max(enc_in - series_dim, 1)
-                # Build the underlying TiDE module with the updated config.
                 self._tsl_instance = self._tsl_class(self.config)
                 return self._tsl_instance
 
@@ -333,7 +321,6 @@ def get_class(name: str) -> Type[nn.Module]:
                     [history_exog, x_dec], dim=1
                 ).to(dtype=_torch_mod.float32)
 
-                # Call TiDE.forecast directly with a single-channel target.
                 tide = self._tsl_instance
                 tide.task_name = "short_term_forecast"
                 tide.use_future_exog = True
@@ -345,10 +332,8 @@ def get_class(name: str) -> Type[nn.Module]:
 
         _Wrapper = _TiDEWrapper
 
-    # -----------------------------------------------------------------
     # TFT: works similarly to DLinear but its TFTEmbedding requires the
     # decoder to be exactly ``pred_len`` rows (not label_len + pred_len).
-    # -----------------------------------------------------------------
     if name == "TemporalFusionTransformer":
         from ts_benchmark.baselines.time_series_library.models import (
             TemporalFusionTransformer as _TFT,
@@ -373,7 +358,6 @@ def get_class(name: str) -> Type[nn.Module]:
                     and hasattr(self.config, "horizon")
                 ):
                     self.config.pred_len = self.config.horizon
-                # Reflect the actual exogenous count from the dataset size.
                 enc_in = getattr(self.config, "enc_in", 6) or 6
                 self.config.covariate_dim = max(enc_in - 1, 1)
                 _tft_datatype_setup(tsl_class, self.config)
@@ -387,7 +371,6 @@ def get_class(name: str) -> Type[nn.Module]:
                 """
                 device = input.device
 
-                # x_enc: full history [target, exog...]
                 x_enc = input.to(device)
 
                 # x_dec: only the FUTURE pred_len rows of ``target``.  We

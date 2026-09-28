@@ -18,7 +18,6 @@ def _parse_target_channel(
     target_columns = []
     for item in target_channel:
         if isinstance(item, int):
-            # Handle single integer index (supports negative indices)
             actual_index = item if item >= 0 else num_columns + item
             if 0 <= actual_index < num_columns:
                 target_columns.append(actual_index)
@@ -27,7 +26,6 @@ def _parse_target_channel(
                     f"target_channel configuration error: Column index {item} is out of range (total columns: {num_columns})."
                 )
         elif isinstance(item, (list, tuple)) and len(item) == 2:
-            # Handle slice represented as a list or tuple, e.g., [2, 4] or (2, 4) selects columns 2 and 3
             start, end = item
             start = start if start >= 0 else num_columns + start
             end = end if end >= 0 else num_columns + end
@@ -45,7 +43,6 @@ def _parse_target_channel(
                     f"target_channel configuration error: Slice start index {start} is greater than end index {end}."
                 )
 
-            # Add the range of indices to target_columns
             slice_indices = list(range(start, end))
             target_columns.extend(slice_indices)
         else:
@@ -53,7 +50,6 @@ def _parse_target_channel(
                 f"target_channel configuration error: Invalid configuration item {item}."
             )
 
-    # Remove duplicates while preserving order (using OrderedDict for compatibility with older Python versions)
     target_columns_unique = list(OrderedDict.fromkeys(target_columns))
     return target_columns_unique
 
@@ -102,18 +98,14 @@ def split_channel(
     """
     num_columns = df.shape[1]  # Total number of columns in the DataFrame
 
-    # Parse target_channel to get target column indices
     target_columns = _parse_target_channel(target_channel, num_columns)
 
     if target_channel is not None:
-        # Determine exog columns by excluding target columns
         all_columns = set(range(num_columns))
         exog_columns = sorted(all_columns - set(target_columns))
     else:
-        # If target_channel is None, exog_columns is empty
         exog_columns = []
 
-    # Split the DataFrame into target and exog parts
     target_df = df.iloc[:, target_columns]
     exog_df = (
         df.iloc[:, exog_columns] if exog_columns else None

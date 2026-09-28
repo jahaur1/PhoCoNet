@@ -114,7 +114,6 @@ class ProbAttention(nn.Module):
     def _get_initial_context(self, V, L_Q):
         B, H, L_V, D = V.shape
         if not self.mask_flag:
-            # V_sum = V.sum(dim=-2)
             V_sum = V.mean(dim=-2)
             contex = V_sum.unsqueeze(-2).expand(B, H,
                                                 L_Q, V_sum.shape[-1]).clone()

@@ -437,7 +437,6 @@ class MultiWaveletCross(nn.Module):
 
         # decompose
         for i in range(ns - self.L):
-            # print('q shape',q.shape)
             d, q = self.wavelet_transform(q)
             Ud_q += [tuple([d, q])]
             Us_q += [d]

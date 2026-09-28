@@ -115,7 +115,6 @@ class timexer_model(nn.Module):
 
     def __init__(self, configs):
         super(timexer_model, self).__init__()
-        # self.features = configs.features
         self.seq_len = configs.seq_len
         self.pred_len = configs.pred_len
         self.use_norm = True

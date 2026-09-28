@@ -54,9 +54,6 @@ class DAGModel(nn.Module):
 
         )
 
-        # self.history_x_projector = CompressAndProject(self.series_dim, self.seq_len, config.d_model)
-        # self.future_exog_projector = CompressAndProject(config.enc_in - self.series_dim, self.pred_len, config.d_model)
-
     def forward(self, input, exog_future):
         # input: [batch_size, seq_len, n_vars]
         temporal_causality_loss = 0

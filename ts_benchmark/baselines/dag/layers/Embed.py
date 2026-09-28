@@ -13,8 +13,6 @@ class CompressAndProject(nn.Module):
             nn.ReLU(),
             nn.Linear(seq_len * 2, d_model)
         )
-        # self._init_weights()
-
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):

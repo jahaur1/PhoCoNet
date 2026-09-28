@@ -10,7 +10,6 @@ plt.switch_backend('agg')
 
 
 def adjust_learning_rate(optimizer, epoch, args):
-    # lr = args.learning_rate * (0.2 ** (epoch // 2))
     if args.lradj == 'type1':
         lr_adjust = {epoch: args.lr * (0.5 ** ((epoch - 1) // 1))}
     elif args.lradj == 'type2':
@@ -61,5 +60,4 @@ class EarlyStopping:
             f"Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ..."
         )
         self.check_point = copy.deepcopy(model.state_dict())
-        # self.check_point = model.state_dict()
         self.val_loss_min = val_loss
