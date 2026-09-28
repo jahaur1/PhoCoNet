@@ -1,8 +1,13 @@
 einops
 matplotlib
-numpy
-pandas
+numpy<2
+pandas<3
 scikit-learn
 scipy
-shap
+shap<0.47
 torch
+dash
+dash-bootstrap-components
+ray
+reformer-pytorch
+pytest

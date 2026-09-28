@@ -20,6 +20,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.font_manager import FontProperties
 import numpy as np
 import pandas as pd
 import shap
@@ -46,6 +47,14 @@ MAIN_RESULT = ROOT / "result" / "phoconet_main"
 HISTORY = 96
 HORIZON = 24
 SEED = 2021
+
+STATION_DISPLAY = {
+    "juzizhou": "Juzizhou",
+    "sanjiaozhou": "Sanjiaozhou",
+    "laodaohe": "Laodaohe",
+}
+HISTORY_COLOR = "#4C78A8"
+ONLINE_COLOR = "#F28E2B"
 
 
 def train_final(station: str, checkpoint: Path, num_epochs: int) -> tuple:
@@ -308,32 +317,66 @@ def group_attributions(
     samples: np.ndarray,
     target_cols: list[str],
     exog_cols: list[str],
-) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray, dict]:
+) -> tuple[list[str], np.ndarray, np.ndarray, np.ndarray, dict, pd.DataFrame]:
+    """Aggregate time-step attributions into one row per water-quality variable.
+
+    The beeswarm x position is the signed sum across every available time step
+    for a variable. Its colour is the variable's mean normalized value over
+    the same input window. Source-specific absolute masses are retained in a
+    separate table so history/online provenance is not lost by aggregation.
+    """
     feature_names = target_cols + exog_cols
-    labels = [f"{name} (history)" for name in feature_names]
-    labels += [f"{name} (online)" for name in exog_cols]
     grouped_shap = []
     grouped_values = []
     absolute_importance = []
-    for channel in range(len(feature_names)):
-        grouped_shap.append(attributions[:, :HISTORY, channel].sum(axis=1))
-        grouped_values.append(samples[:, :HISTORY, channel].mean(axis=1))
-        absolute_importance.append(np.abs(attributions[:, :HISTORY, channel]).sum(axis=1).mean())
-    for channel in range(1, len(feature_names)):
-        grouped_shap.append(attributions[:, HISTORY:, channel].sum(axis=1))
-        grouped_values.append(samples[:, HISTORY:, channel].mean(axis=1))
-        absolute_importance.append(np.abs(attributions[:, HISTORY:, channel]).sum(axis=1).mean())
+    source_rows = []
+    for channel, name in enumerate(feature_names):
+        history_attr = attributions[:, :HISTORY, channel]
+        signed_shap = history_attr.sum(axis=1)
+        history_importance = float(np.abs(history_attr).sum(axis=1).mean())
+        online_importance = 0.0
+
+        if channel == 0:
+            # Future TP is the output being predicted and is never an input.
+            feature_value = samples[:, :HISTORY, channel].mean(axis=1)
+        else:
+            online_attr = attributions[:, HISTORY:, channel]
+            signed_shap = signed_shap + online_attr.sum(axis=1)
+            online_importance = float(np.abs(online_attr).sum(axis=1).mean())
+            feature_value = samples[:, :, channel].mean(axis=1)
+
+        grouped_shap.append(signed_shap)
+        grouped_values.append(feature_value)
+        absolute_importance.append(history_importance + online_importance)
+        source_rows.extend(
+            [
+                {"variable": name, "source": "History", "absolute_mass": history_importance},
+                {"variable": name, "source": "Online window", "absolute_mass": online_importance},
+            ]
+        )
+
     grouped_shap_array = np.stack(grouped_shap, axis=1)
     grouped_value_array = np.stack(grouped_values, axis=1)
     importance = np.asarray(absolute_importance, dtype=float)
     importance /= max(importance.sum(), 1e-12)
+    source_breakdown = pd.DataFrame(source_rows)
+    source_breakdown["importance"] = source_breakdown["absolute_mass"] / max(
+        source_breakdown["absolute_mass"].sum(), 1e-12
+    )
     history_mass = float(np.abs(attributions[:, :HISTORY]).sum())
     online_mass = float(np.abs(attributions[:, HISTORY:, 1:]).sum())
     sources = {
         "history_share": history_mass / max(history_mass + online_mass, 1e-12),
         "online_share": online_mass / max(history_mass + online_mass, 1e-12),
     }
-    return labels, grouped_shap_array, grouped_value_array, importance, sources
+    return (
+        feature_names,
+        grouped_shap_array,
+        grouped_value_array,
+        importance,
+        sources,
+        source_breakdown,
+    )
 
 
 def plot_station(
@@ -342,34 +385,115 @@ def plot_station(
     grouped_shap: np.ndarray,
     grouped_values: np.ndarray,
     importance: np.ndarray,
+    sources: dict,
     out: Path,
 ) -> None:
-    plt.figure(figsize=(10, 8))
-    shap.summary_plot(
+    display_name = STATION_DISPLAY.get(station, station)
+    num_explained = len(grouped_shap)
+    display_count = min(200, num_explained)
+    display_indices = np.linspace(0, num_explained - 1, display_count).round().astype(int)
+
+    def render_beeswarm(
+        shap_values: np.ndarray,
+        feature_values: np.ndarray,
+        title_suffix: str,
+        marker_size: float,
+        alpha: float,
+        filenames: list[str],
+    ) -> None:
+        plt.figure(figsize=(9.4, 5.9))
+        shap.summary_plot(
+            shap_values,
+            feature_values,
+            feature_names=labels,
+            max_display=len(labels),
+            show=False,
+            plot_type="dot",
+            plot_size=None,
+        )
+        figure = plt.gcf()
+        figure.set_size_inches(9.4, 5.9)
+        axis = figure.axes[0]
+        for collection in axis.collections:
+            if hasattr(collection, "set_sizes"):
+                collection.set_sizes([marker_size])
+                collection.set_alpha(alpha)
+                collection.set_edgecolor("white")
+                collection.set_linewidth(0.20)
+        axis.set_title(
+            f"{display_name} — variable-level GradientSHAP\n{title_suffix}",
+            pad=11,
+            fontsize=14,
+            weight="bold",
+        )
+        axis.set_xlabel("GradientSHAP value (impact on mean 24-step TP estimate)")
+        axis.grid(axis="y", color="#E6E6E6", linewidth=0.7, linestyle="--")
+        axis.set_axisbelow(True)
+        if len(figure.axes) > 1:
+            figure.axes[-1].set_ylabel("Normalized feature value", labelpad=10)
+        plt.tight_layout()
+        for filename in filenames:
+            figure.savefig(out / filename, dpi=300, bbox_inches="tight")
+        plt.close(figure)
+
+    render_beeswarm(
         grouped_shap,
         grouped_values,
-        feature_names=labels,
-        max_display=len(labels),
-        show=False,
-        plot_type="dot",
-        plot_size=None,
+        f"All {num_explained} test windows",
+        marker_size=23,
+        alpha=0.55,
+        filenames=[f"shap_summary_phoconet_{station}_all{num_explained}.png"],
     )
-    plt.title("")
-    plt.xlabel("GradientSHAP value for mean 24-step TP estimate")
-    plt.tight_layout()
-    plt.savefig(out / f"shap_summary_phoconet_{station}.png", dpi=300, bbox_inches="tight")
-    plt.close()
+    render_beeswarm(
+        grouped_shap[display_indices],
+        grouped_values[display_indices],
+        f"{display_count}-window display sample; statistics use all {num_explained}",
+        marker_size=38,
+        alpha=0.72,
+        filenames=[
+            f"shap_summary_phoconet_{station}_display{display_count}.png",
+            f"shap_summary_phoconet_{station}.png",
+        ],
+    )
 
     order = np.argsort(importance)
-    fig, ax = plt.subplots(figsize=(9, 7))
-    colors = ["#4472C4" if labels[index].endswith("(history)") else "#ED7D31" for index in order]
-    ax.barh(np.arange(len(labels)), importance[order], color=colors)
+    fig, ax = plt.subplots(figsize=(8.5, 5.4))
+    ax.barh(np.arange(len(labels)), importance[order], color="#5B8FF9")
     ax.set_yticks(np.arange(len(labels)))
     ax.set_yticklabels([labels[index] for index in order])
     ax.set_xlabel("Normalized mean absolute GradientSHAP contribution")
+    ax.set_title(f"{display_name} — variable importance", pad=12, weight="semibold")
+    ax.grid(axis="x", color="#EAEAEA", linewidth=0.7)
+    ax.set_axisbelow(True)
     ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
     fig.savefig(out / f"shap_importance_phoconet_{station}.png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    fig, ax = plt.subplots(figsize=(7.4, 3.0))
+    shares = [sources["history_share"], sources["online_share"]]
+    y = np.array([1, 0])
+    ax.barh(y, [1, 1], color="#EEF1F5", height=0.34)
+    ax.barh(y, shares, color=[HISTORY_COLOR, ONLINE_COLOR], height=0.34)
+    for row, share, color in zip(y, shares, [HISTORY_COLOR, ONLINE_COLOR]):
+        ax.text(
+            share + 0.018,
+            row,
+            f"{share:.1%}",
+            va="center",
+            ha="left",
+            color=color,
+            fontsize=12,
+            weight="bold",
+        )
+    ax.set_yticks(y, ["History", "Online window"])
+    ax.set_xlim(0, 1.12)
+    ax.set_xticks([])
+    ax.set_title(f"{display_name} — attribution source", pad=10, fontsize=14, weight="bold")
+    ax.spines[:].set_visible(False)
+    ax.tick_params(axis="y", length=0, labelsize=11)
+    fig.tight_layout()
+    fig.savefig(out / f"shap_source_share_phoconet_{station}.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -404,7 +528,12 @@ def run_station(
 
     tv_end = int(len(series) * 0.8)
     test_origins = np.arange(tv_end, len(series) - HORIZON + 1)
-    selected = test_origins[np.linspace(0, len(test_origins) - 1, num_windows).round().astype(int)]
+    if num_windows <= 0 or num_windows >= len(test_origins):
+        selected = test_origins
+    else:
+        selected = test_origins[
+            np.linspace(0, len(test_origins) - 1, num_windows).round().astype(int)
+        ]
     train_end = int(tv_end * 0.875)
     background_origins = np.linspace(
         HISTORY, train_end - HORIZON, background_count
@@ -441,10 +570,10 @@ def run_station(
     attributions, diagnostic = expected_gradients(
         model.model, samples, marks, backgrounds, integration_steps
     )
-    labels, grouped_shap, grouped_values, importance, sources = group_attributions(
+    labels, grouped_shap, grouped_values, importance, sources, source_breakdown = group_attributions(
         attributions, samples, target_cols, exog_cols
     )
-    plot_station(station, labels, grouped_shap, grouped_values, importance, out)
+    plot_station(station, labels, grouped_shap, grouped_values, importance, sources, out)
 
     np.savez_compressed(
         out / "gradient_shap_attributions.npz",
@@ -459,8 +588,9 @@ def run_station(
     )
     pd.DataFrame(grouped_shap, columns=labels).to_csv(out / "grouped_shap_values.csv", index=False)
     pd.DataFrame(grouped_values, columns=labels).to_csv(out / "grouped_feature_values.csv", index=False)
-    importance_frame = pd.DataFrame({"feature_source": labels, "importance": importance})
+    importance_frame = pd.DataFrame({"variable": labels, "importance": importance})
     importance_frame.to_csv(out / "importance.csv", index=False)
+    source_breakdown.to_csv(out / "importance_by_variable_and_source.csv", index=False)
     metadata = {
         "station": station,
         "model": "PhoCoNet",
@@ -495,28 +625,98 @@ def run_station(
 def cross_station(frames: list[pd.DataFrame]) -> None:
     combined = pd.concat(frames, ignore_index=True)
     combined.to_csv(OUTPUT / "cross_station_importance.csv", index=False)
-    pivot = combined.pivot(index="feature_source", columns="station", values="importance")
+    pivot = combined.pivot(index="variable", columns="station", values="importance")
     pivot["mean"] = pivot.mean(axis=1)
     pivot = pivot.sort_values("mean", ascending=True)
     pivot.to_csv(OUTPUT / "cross_station_importance_pivot.csv")
 
-    fig, ax = plt.subplots(figsize=(10, 8))
-    stations = list(DATASETS)
+    fig, ax = plt.subplots(figsize=(9.5, 6.2))
+    stations = [station for station in DATASETS if station in pivot.columns]
     y = np.arange(len(pivot))
-    width = 0.22
+    width = min(0.28, 0.72 / len(stations))
     for offset, station in enumerate(stations):
-        ax.barh(y + (offset - 1) * width, pivot[station], height=width, label=station)
+        centered_offset = (offset - (len(stations) - 1) / 2) * width
+        ax.barh(y + centered_offset, pivot[station], height=width, label=station)
     ax.set_yticks(y)
     ax.set_yticklabels(pivot.index)
     ax.set_xlabel("Normalized mean absolute GradientSHAP contribution")
+    ax.set_title("Variable importance across stations", pad=12, weight="semibold")
     ax.legend(frameon=False)
+    ax.grid(axis="x", color="#EAEAEA", linewidth=0.7)
+    ax.set_axisbelow(True)
     ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
     fig.savefig(OUTPUT / "shap_importance_cross_station.png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
     sources = combined.groupby("station", sort=False)[["history_share", "online_share"]].first()
+    sources = sources.reindex(stations)
     sources.to_csv(OUTPUT / "cross_station_source_share.csv")
+
+    chinese_names = {
+        "juzizhou": "桔子洲",
+        "sanjiaozhou": "三角洲",
+        "laodaohe": "捞刀河",
+    }
+    regular_font = FontProperties(fname=r"C:\Windows\Fonts\msyh.ttc", size=12)
+    bold_font = FontProperties(fname=r"C:\Windows\Fonts\msyhbd.ttc", size=12)
+    title_font = FontProperties(fname=r"C:\Windows\Fonts\msyhbd.ttc", size=16)
+    note_font = FontProperties(fname=r"C:\Windows\Fonts\msyh.ttc", size=9)
+    table_rows = [
+        [
+            chinese_names.get(station, station),
+            f"{sources.loc[station, 'history_share']:.1%}",
+            f"{sources.loc[station, 'online_share']:.1%}",
+        ]
+        for station in stations
+    ]
+
+    fig, ax = plt.subplots(figsize=(7.4, 2.6))
+    ax.axis("off")
+    table = ax.table(
+        cellText=table_rows,
+        colLabels=["数据集", "历史信息占比", "在线窗口占比"],
+        cellLoc="center",
+        colLoc="center",
+        colWidths=[0.28, 0.36, 0.36],
+        bbox=[0.04, 0.20, 0.92, 0.58],
+    )
+    table.auto_set_font_size(False)
+    for (row, column), cell in table.get_celld().items():
+        cell.set_edgecolor("white")
+        cell.set_linewidth(2.0)
+        if row == 0:
+            cell.set_facecolor("#34495E")
+            cell.get_text().set_color("white")
+            cell.get_text().set_fontproperties(bold_font)
+        else:
+            cell.get_text().set_fontproperties(regular_font)
+            if column == 0:
+                cell.set_facecolor("#F3F5F7")
+                cell.get_text().set_fontproperties(bold_font)
+                cell.get_text().set_color("#273444")
+            elif column == 1:
+                cell.set_facecolor("#E8F1FA")
+                cell.get_text().set_color(HISTORY_COLOR)
+                cell.get_text().set_fontproperties(bold_font)
+            else:
+                cell.set_facecolor("#FFF0E2")
+                cell.get_text().set_color(ONLINE_COLOR)
+                cell.get_text().set_fontproperties(bold_font)
+
+    fig.text(0.5, 0.90, "信息来源贡献占比", ha="center", va="center", fontproperties=title_font)
+    fig.text(
+        0.5,
+        0.08,
+        "注：占比基于全部 435 个测试窗口的绝对 GradientSHAP 归因总量。",
+        ha="center",
+        va="center",
+        color="#667085",
+        fontproperties=note_font,
+    )
+    for filename in ["shap_source_share_cross_station.png", "shap_source_share_table.png"]:
+        fig.savefig(OUTPUT / filename, dpi=300, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
     lines = [
         "# PhoCoNet GradientSHAP summary",
         "",
@@ -528,10 +728,10 @@ def cross_station(frames: list[pd.DataFrame]) -> None:
         "| Station | History share | Online-window share | Top three inputs |",
         "|---|---:|---:|---|",
     ]
-    for station in DATASETS:
+    for station in stations:
         station_rows = combined[combined.station == station].sort_values("importance", ascending=False)
         top = ", ".join(
-            f"{row.feature_source} ({row.importance:.1%})"
+            f"{row.variable} ({row.importance:.1%})"
             for row in station_rows.head(3).itertuples()
         )
         source = sources.loc[station]
@@ -545,7 +745,12 @@ def cross_station(frames: list[pd.DataFrame]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stations", nargs="+", choices=DATASETS, default=list(DATASETS))
-    parser.add_argument("--num-windows", type=int, default=32)
+    parser.add_argument(
+        "--num-windows",
+        type=int,
+        default=0,
+        help="number of evenly spaced test windows; 0 (default) uses every test window",
+    )
     parser.add_argument("--background-count", type=int, default=8)
     parser.add_argument("--integration-steps", type=int, default=16)
     parser.add_argument("--num-epochs", type=int, default=100)
@@ -561,7 +766,7 @@ def main() -> int:
         )
         for station in args.stations
     ]
-    if tuple(args.stations) == DATASETS:
+    if len(frames) > 1:
         cross_station(frames)
     return 0
 
