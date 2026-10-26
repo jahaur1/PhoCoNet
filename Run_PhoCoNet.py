@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import argparse
 import subprocess
 import sys
 
@@ -15,6 +16,9 @@ from experiments.config import (
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--model", choices=("PhoCoNet", "PhoCoNet2"), default="PhoCoNet")
+    args = parser.parse_args()
     for dataset in DATASETS:
         command = [
             sys.executable,
@@ -26,7 +30,7 @@ def main() -> int:
             "--strategy-args",
             json.dumps({"horizon": 24, "target_channel": [TARGET_CHANNEL]}),
             "--model-name",
-            MODEL_NAME,
+            MODEL_NAME if args.model == "PhoCoNet" else "phoconet.PhoCoNet2",
             "--model-hyper-params",
             json.dumps(params_for(dataset, 24)),
             "--gpus",
@@ -36,7 +40,7 @@ def main() -> int:
             "--timeout",
             "60000",
             "--save-path",
-            f"{dataset}/PhoCoNet_TP",
+            f"{dataset}/{args.model}_TP",
             "--deterministic",
             "full",
         ]

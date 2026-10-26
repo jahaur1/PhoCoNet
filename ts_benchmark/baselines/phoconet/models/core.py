@@ -57,6 +57,8 @@ class Model(nn.Module):
         self.seq_len = configs.seq_len
         self.pred_len = configs.horizon
         self.d_model = configs.d_model
+        self.patch_len = int(getattr(configs, "patch_len", self.period))
+        self.patch_stride = int(getattr(configs, "patch_stride", self.patch_len))
 
         self.use_future_exog = getattr(configs, "use_future_exog", True)
         self.use_history_target = getattr(configs, "use_history_target", True)
@@ -102,8 +104,14 @@ class Model(nn.Module):
         self._input_noise_call_index = 0
 
         # Patch setting
-        assert self.seq_len % self.period == 0
-        self.num_p = self.seq_len // self.period
+        if not 1 <= self.patch_len <= self.seq_len:
+            raise ValueError("patch_len must lie in [1, seq_len]")
+        if self.patch_stride < 1:
+            raise ValueError("patch_stride must be positive")
+        span = self.seq_len - self.patch_len
+        self.num_p = span // self.patch_stride + 1
+        if span % self.patch_stride:
+            self.num_p += 1
 
         if getattr(configs, "num_p", None) is None:
             configs.num_p = self.num_p

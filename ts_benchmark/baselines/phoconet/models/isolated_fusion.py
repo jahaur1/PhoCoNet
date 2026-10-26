@@ -81,7 +81,9 @@ class Model(PhoCoNetQModel):
         x_enc: torch.Tensor,
         exog_future: torch.Tensor | None,
     ) -> torch.Tensor:
-        if exog_future is None or self.isolated_local_gate is None:
+        if exog_future is None or (
+            self.local_gate_mode == "adaptive" and self.isolated_local_gate is None
+        ):
             return x_enc
         future_len = min(exog_future.shape[1], self.pred_len, self.seq_len)
         if future_len <= 0:
@@ -91,13 +93,8 @@ class Model(PhoCoNetQModel):
             :, :, self.target_channels : self.target_channels + self.q_exog_dim
         ]
         current_auxiliary = exog_future[:, -future_len:, :]
-        gate_input = torch.stack(
-            (historical_auxiliary, current_auxiliary), dim=-1
-        )
-        gate = self.isolated_local_gate(gate_input).squeeze(-1)
-        fused_auxiliary = (
-            gate * current_auxiliary
-            + (1.0 - gate) * historical_auxiliary
+        fused_auxiliary = self._fuse_local_auxiliary(
+            historical_auxiliary, current_auxiliary
         )
         history_tail = torch.cat(
             (
@@ -114,6 +111,14 @@ class Model(PhoCoNetQModel):
         x_enc = torch.cat((x_enc, history_tail), dim=1)
         return x_enc[:, -self.seq_len :, :]
 
+    def _fuse_local_auxiliary(self, historical_auxiliary, current_auxiliary):
+        gate_input = torch.stack((historical_auxiliary, current_auxiliary), dim=-1)
+        gate = (
+            self.isolated_local_gate(gate_input).squeeze(-1)
+            if self.local_gate_mode == "adaptive" else self.local_gate_fixed
+        )
+        return gate * current_auxiliary + (1.0 - gate) * historical_auxiliary
+
     def _path2_embedding_enhance(
         self,
         x_enc_emb: torch.Tensor,
@@ -121,7 +126,7 @@ class Model(PhoCoNetQModel):
     ) -> torch.Tensor:
         if (
             self.isolated_future_projection is None
-            or self.future_exog_gate is None
+            or (self.global_gate_mode == "adaptive" and self.future_exog_gate is None)
         ):
             return x_enc_emb
         current_summary = exog_future.mean(dim=1).unsqueeze(-1)
@@ -142,7 +147,10 @@ class Model(PhoCoNetQModel):
             ),
             dim=1,
         )
-        gate = self.future_exog_gate(torch.cat((x_enc_emb, injected), dim=-1))
+        gate = (
+            self.future_exog_gate(torch.cat((x_enc_emb, injected), dim=-1))
+            if self.global_gate_mode == "adaptive" else self.global_gate_fixed
+        )
         # The target and calendar channels receive an exact zero update.
         return x_enc_emb + gate * injected
 

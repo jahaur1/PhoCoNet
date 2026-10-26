@@ -1,3 +1,3 @@
-from ts_benchmark.baselines.phoconet.phoconet import PhoCoNet
+from ts_benchmark.baselines.phoconet.phoconet import PhoCoNet, PhoCoNet2
 
-__all__ = ["PhoCoNet"]
+__all__ = ["PhoCoNet", "PhoCoNet2"]

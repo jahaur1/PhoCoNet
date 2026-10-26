@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import torch
 
-from ts_benchmark.baselines.phoconet.models.phoconet import Model
+from ts_benchmark.baselines.phoconet.models.phoconet2 import Model
 
 
 def make_config() -> SimpleNamespace:
@@ -79,3 +79,21 @@ def test_forward_shape_and_gradients() -> None:
     assert model.q_delta[0].weight.grad is not None
     assert model.q_gate[0].weight.grad is not None
     assert model.aligned_q_variable_modulation.score.weight.grad is not None
+
+
+def test_overlapping_patches_keep_latest_history() -> None:
+    config = make_config()
+    config.patch_len = 8
+    config.patch_stride = 5
+    model = Model(config)
+    assert model.num_p == 5
+    assert model.patch_embed.num_patches == 5
+    assert model.patch_embed.patch_size == 8
+    assert model.patch_embed.patch_stride == 5
+    model.init_fusion_components(exog_dim=4, alpha_init=0.0)
+    output = model(
+        torch.randn(2, 24, 5),
+        torch.randn(2, 24, 6),
+        torch.randn(2, 4, 4),
+    )
+    assert output.shape == (2, 4, 5)

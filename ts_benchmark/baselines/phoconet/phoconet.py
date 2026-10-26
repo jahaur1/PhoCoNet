@@ -6,10 +6,10 @@ from torch import optim
 from ts_benchmark.baselines.deep_forecasting_model_base import (
     DeepForecastingModelBase,
 )
-from ts_benchmark.baselines.phoconet.models.phoconet import Model
+from ts_benchmark.baselines.phoconet.models.phoconet2 import Model as LegacyModel
 
 
-MODEL_HYPER_PARAMS = {
+PHOCONET2_HYPER_PARAMS = {
     "seq_len": 96,
     "horizon": 24,
     "period": 6,
@@ -61,15 +61,26 @@ MODEL_HYPER_PARAMS = {
 }
 
 
-class PhoCoNet(DeepForecastingModelBase):
+MODEL_HYPER_PARAMS = {
+    **PHOCONET2_HYPER_PARAMS,
+    "local_gate_mode": "fixed",
+    "global_gate_mode": "fixed",
+    "use_global_aux_projection": False,
+    "q_modulation_attention": "learned",
+    "q_modulation_context": True,
+    "q_modulation_identity": True,
+}
+
+
+class PhoCoNet2(DeepForecastingModelBase):
     """PhoCoNet for block soft sensing with delayed laboratory assays."""
 
     def __init__(self, **kwargs):
-        super().__init__(MODEL_HYPER_PARAMS, **kwargs)
+        super().__init__(PHOCONET2_HYPER_PARAMS, **kwargs)
 
     @property
     def model_name(self):
-        return "PhoCoNet"
+        return "PhoCoNet2"
 
     def _adjust_lr(self, optimizer, epoch, config):
         if config.lradj == "type1":
@@ -94,7 +105,7 @@ class PhoCoNet(DeepForecastingModelBase):
             self.config.output_dim = 1
         if not hasattr(self.config, "input_dim"):
             self.config.input_dim = 1
-        return Model(self.config)
+        return LegacyModel(self.config)
 
     def _init_optimizer(self, CovariateFusion=None):
         enc_in = getattr(self.config, "enc_in", 1)
@@ -124,4 +135,25 @@ class PhoCoNet(DeepForecastingModelBase):
         return {"output": output}
 
 
-__all__ = ["PhoCoNet", "MODEL_HYPER_PARAMS"]
+class PhoCoNet(PhoCoNet2):
+    def __init__(self, **kwargs):
+        super().__init__(**{
+            **MODEL_HYPER_PARAMS, **kwargs,
+            "local_gate_mode": "fixed", "global_gate_mode": "fixed",
+            "use_global_aux_projection": False,
+        })
+
+    @property
+    def model_name(self):
+        return "PhoCoNet"
+
+    def _init_model(self):
+        from ts_benchmark.baselines.phoconet.models.phoconet import Model
+        if not hasattr(self.config, "output_dim"):
+            self.config.output_dim = 1
+        if not hasattr(self.config, "input_dim"):
+            self.config.input_dim = 1
+        return Model(self.config)
+
+
+__all__ = ["PhoCoNet", "PhoCoNet2", "MODEL_HYPER_PARAMS", "PHOCONET2_HYPER_PARAMS"]

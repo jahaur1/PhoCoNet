@@ -201,6 +201,10 @@ class AlignedQVariableModulation(nn.Module):
             raise ValueError("output_scale must be positive")
         self.variable_count = int(variable_count)
         self.max_modulation = float(max_modulation)
+        self.attention_mode = "learned"
+        self.condition_on_target = True
+        self.use_variable_identity = True
+        self.use_q_change = True
         self.value_projection = nn.Linear(2, attention_dim, bias=False)
         self.context_projection = nn.Linear(
             context_dim, attention_dim, bias=False
@@ -238,14 +242,26 @@ class AlignedQVariableModulation(nn.Module):
             raise ValueError(
                 "online variable count does not match the modulation module"
             )
-        variable_features = torch.stack((current_q, q_change), dim=-1)
-        variable_tokens = self.value_projection(variable_features)
-        variable_tokens = variable_tokens + self.variable_identity.view(
-            1, 1, self.variable_count, -1
+        variable_features = (
+            torch.stack((current_q, q_change), dim=-1)
+            if self.use_q_change else current_q.unsqueeze(-1)
         )
-        query = self.context_projection(target_context).unsqueeze(-2)
-        scores = self.score(torch.tanh(variable_tokens + query)).squeeze(-1)
-        attention = torch.softmax(scores, dim=-1)
+        variable_tokens = self.value_projection(variable_features)
+        if self.use_variable_identity:
+            variable_tokens = variable_tokens + self.variable_identity.view(
+                1, 1, self.variable_count, -1
+            )
+        if self.attention_mode == "uniform":
+            attention = torch.full_like(current_q, 1.0 / self.variable_count)
+        elif self.attention_mode == "learned":
+            query = (
+                self.context_projection(target_context).unsqueeze(-2)
+                if self.condition_on_target else 0.0
+            )
+            scores = self.score(torch.tanh(variable_tokens + query)).squeeze(-1)
+            attention = torch.softmax(scores, dim=-1)
+        else:
+            raise ValueError("modulation attention must be learned or uniform")
         attended_context = torch.sum(
             attention.unsqueeze(-1) * variable_tokens, dim=-2
         )
