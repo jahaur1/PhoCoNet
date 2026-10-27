@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -12,6 +13,7 @@ import sys
 
 import pandas as pd
 
+from experiments.paths import RESULT_ROOT
 from experiments.config import (
     DATASETS,
     HORIZONS,
@@ -23,7 +25,7 @@ from experiments.config import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "result" / "phoconet_main"
+OUTPUT = RESULT_ROOT / "phoconet_main"
 METRICS = ("mse_norm", "mae_norm", "rmse_norm")
 
 
@@ -33,7 +35,7 @@ def parse_report(path: Path) -> dict[str, float]:
         for row in list(csv.reader(handle))[1:]:
             if len(row) >= 3 and row[1] in METRICS:
                 values[row[1]] = float(row[2])
-    if set(values) != set(METRICS):
+    if set(values) != set(METRICS) or not all(math.isfinite(value) for value in values.values()):
         raise ValueError(f"invalid report: {path}")
     return values
 
@@ -64,7 +66,14 @@ def run_one(
     directory = OUTPUT / station / f"h{horizon}" / f"seed_{seed}"
     directory.mkdir(parents=True, exist_ok=True)
     report = None if force else valid_report(directory)
+    if not (directory / "predictions.npz").is_file() or not (directory / "checkpoint.pt").is_file():
+        report = None
     params = params_for(station, horizon, epochs)
+    checkpoint = directory / "checkpoint.pt"
+    if force and checkpoint.exists():
+        from datetime import datetime
+        checkpoint.rename(directory / ("checkpoint_previous_" + datetime.now().strftime("%Y%m%dT%H%M%S%f") + ".pt"))
+    params["robustness_checkpoint_cache"] = str(checkpoint)
     if report is None:
         command = [
             sys.executable,
@@ -115,6 +124,7 @@ def run_one(
         environment = {
             **os.environ,
             "PYTHONHASHSEED": str(seed),
+            "PHOCONET_PREDICTIONS_PATH": str(directory / "predictions.npz"),
             "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONIOENCODING": "utf-8",
             "OMP_NUM_THREADS": "2",
@@ -195,6 +205,8 @@ def main() -> int:
         OUTPUT / "macro_by_seed.csv", index=False
     )
     frame.groupby(["station", "horizon"], as_index=False).agg(
+        mse_mean=("mse_norm", "mean"),
+        mse_sd=("mse_norm", "std"),
         mae_mean=("mae_norm", "mean"),
         mae_sd=("mae_norm", "std"),
         rmse_mean=("rmse_norm", "mean"),

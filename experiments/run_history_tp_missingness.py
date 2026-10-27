@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import torch
 
+from experiments.paths import RESULT_ROOT
 from experiments.config import DATASETS
 from experiments.run_main import params_for
 from experiments.information_value_core import AUXILIARIES, load_frame
@@ -161,21 +162,21 @@ def error_metrics(actual: np.ndarray, predicted: np.ndarray, scale: float) -> di
     }
 
 
-def summarize(rows: list[dict], output: Path) -> list[dict]:
+def summarize(rows: list[dict], output: Path, datasets=DATASETS, rates=RATES, repetitions_count=MASK_REPETITIONS) -> list[dict]:
     summaries: list[dict] = []
-    for station in DATASETS:
+    for station_index, station in enumerate(datasets):
         clean = next(
             row
             for row in rows
             if row["station"] == station and row["missing_rate"] == 0
         )
-        for rate in RATES:
+        for rate in rates:
             group = [
                 row
                 for row in rows
                 if row["station"] == station and row["missing_rate"] == rate
             ]
-            expected = 1 if rate == 0 else MASK_REPETITIONS
+            expected = 1 if rate == 0 else repetitions_count
             if len(group) != expected:
                 raise RuntimeError(
                     f"Incomplete matrix for {station}/{rate}: {len(group)}"
@@ -219,12 +220,14 @@ def make_analysis(summaries: list[dict], output: Path) -> None:
 
     figure_dir = output / "figures"
     figure_dir.mkdir(exist_ok=False)
+    stations = list(dict.fromkeys(row["station"] for row in summaries))
+    n_masks = max(row["n_masks"] for row in summaries)
     for metric, ylabel, stem in (
         ("mse_norm", "Normalized block MSE", "missing_rate_mse"),
         ("mse_increase_pct", "MSE increase from clean (%)", "relative_mse_increase"),
     ):
-        fig, axes = plt.subplots(1, 3, figsize=(12, 3.8), constrained_layout=True)
-        for axis, station in zip(axes, DATASETS):
+        fig, axes = plt.subplots(1, len(stations), figsize=(4 * len(stations), 3.8), constrained_layout=True, squeeze=False)
+        for axis, station in zip(axes.ravel(), stations):
             group = [row for row in summaries if row["station"] == station]
             axis.errorbar(
                 [100 * row["missing_rate"] for row in group],
@@ -245,7 +248,7 @@ def make_analysis(summaries: list[dict], output: Path) -> None:
             if metric == "mse_increase_pct":
                 axis.axhline(0, color="grey", linewidth=0.7)
         fig.suptitle(
-            "PhoCoNet; frozen seed-2021 checkpoint; SD across 10 masks",
+            f"PhoCoNet; frozen seed-2021 checkpoint; up to {n_masks} masks",
             fontsize=11,
         )
         fig.savefig(figure_dir / f"{stem}.png", dpi=220)
@@ -310,7 +313,7 @@ def main() -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=ROOT / "result/phoconet_history_tp_missingness",
+        default=RESULT_ROOT / "phoconet_history_tp_missingness",
     )
     parser.add_argument(
         "--mask-source",
@@ -321,9 +324,22 @@ def main() -> int:
     parser.add_argument(
         "--checkpoint-root",
         type=Path,
-        default=ROOT / "result/phoconet_sensor_noise/model_cache",
+        default=RESULT_ROOT / "phoconet_sensor_noise" / "model_cache",
     )
+    parser.add_argument("--mask-seed", type=int, default=20210726)
+    parser.add_argument("--datasets", nargs="+", choices=DATASETS, default=list(DATASETS))
+    parser.add_argument("--rates", nargs="+", type=float, default=list(RATES))
+    parser.add_argument("--mask-repetitions", type=int, default=MASK_REPETITIONS)
     args = parser.parse_args()
+    if args.mask_repetitions < 1 or any(not 0 <= rate <= 1 for rate in args.rates):
+        parser.error("Invalid rates or mask repetitions")
+    if len(set(args.rates)) != len(args.rates) or len(set(args.datasets)) != len(args.datasets):
+        parser.error("Duplicate rates or datasets")
+    if 0.0 not in args.rates:
+        parser.error("Include rate 0 for the clean reference")
+    rates = tuple(args.rates)
+    repetitions_count = args.mask_repetitions
+    evaluation_count = len(args.datasets) * sum(1 if rate == 0 else repetitions_count for rate in rates)
     output = args.output.resolve()
     mask_source = args.mask_source.resolve() if args.mask_source else None
     checkpoint_root = args.checkpoint_root.resolve()
@@ -353,12 +369,12 @@ def main() -> int:
         "training_runs": 0,
         "history": HISTORY,
         "horizon": HORIZON,
-        "rates": list(RATES),
-        "nonzero_mask_repetitions": MASK_REPETITIONS,
+        "rates": list(rates),
+        "nonzero_mask_repetitions": repetitions_count,
         "mask_rng": (
             "archived uniform draws reused"
             if mask_source is not None
-            else "NumPy default_rng OS entropy; realized arrays archived"
+            else f"NumPy SeedSequence([{args.mask_seed}, station_index]); arrays archived"
         ),
         "mask_source": (
             str(mask_source.relative_to(ROOT))
@@ -373,11 +389,11 @@ def main() -> int:
     }
     write_json(output / "manifest.json", manifest)
 
-    main_source = ROOT / "result/phoconet_main"
+    main_source = RESULT_ROOT / "phoconet_main"
     main_metrics = pd.read_csv(main_source / "metrics_by_seed.csv")
     rows: list[dict] = []
-    print("PhoCoNet; 123 frozen-checkpoint evaluations; no training", flush=True)
-    for station in DATASETS:
+    print(f"PhoCoNet; {evaluation_count} frozen-checkpoint evaluations; no training", flush=True)
+    for station_index, station in enumerate(args.datasets):
         data_path = ROOT / "dataset/forecasting" / f"{station}.csv"
         frame = load_frame(data_path, "full8")
         validation_end = int(len(frame) * 0.8)
@@ -395,13 +411,13 @@ def main() -> int:
             else None
         )
         if uniforms_file is None:
-            uniforms = np.random.default_rng().random(
-                (MASK_REPETITIONS, len(frame))
+            uniforms = np.random.default_rng(np.random.SeedSequence([args.mask_seed, station_index])).random(
+                (repetitions_count, len(frame))
             )
         else:
             with np.load(uniforms_file) as archive:
                 uniforms = archive["uniforms"]
-        if uniforms.shape != (MASK_REPETITIONS, len(frame)):
+        if uniforms.shape != (repetitions_count, len(frame)):
             raise ValueError(f"Unexpected archived mask shape for {station}")
         checkpoint = checkpoint_for(station, checkpoint_root)
         model = load_final_model(station, frame, checkpoint)
@@ -417,8 +433,8 @@ def main() -> int:
         ]
         if len(clean_reference) != 1:
             raise ValueError(f"Missing main-experiment clean reference for {station}")
-        for rate in RATES:
-            repetitions = 1 if rate == 0 else MASK_REPETITIONS
+        for rate in rates:
+            repetitions = 1 if rate == 0 else repetitions_count
             for realization in range(repetitions):
                 missing = (uniforms[realization] < rate) & eligible
                 actual, predicted = predict(
@@ -458,7 +474,7 @@ def main() -> int:
                     }
                 )
                 print(
-                    f"[{len(rows):03d}/123] {station} rate={rate:.0%} "
+                    f"[{len(rows):03d}/{evaluation_count}] {station} rate={rate:.0%} "
                     f"mask={realization + 1} MSE={metrics['mse_norm']:.6f}",
                     flush=True,
                 )
@@ -481,7 +497,7 @@ def main() -> int:
         write_json(output / "manifest.json", manifest)
 
     write_csv(output / "metrics_by_mask.csv", rows)
-    summaries = summarize(rows, output)
+    summaries = summarize(rows, output, args.datasets, rates, repetitions_count)
     make_analysis(summaries, output)
     manifest["finished_utc"] = datetime.now(timezone.utc).isoformat()
     manifest["evaluations"] = len(rows)
@@ -497,7 +513,7 @@ def main() -> int:
             "all_outputs_finite": all(
                 np.isfinite(row[metric]) for row in rows for metric in METRICS
             ),
-            "complete": len(rows) == 123 and len(summaries) == 15,
+            "complete": len(rows) == evaluation_count and len(summaries) == len(args.datasets) * len(rates),
         },
     )
     print(f"Complete: {output}", flush=True)

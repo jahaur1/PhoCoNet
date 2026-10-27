@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 import itertools
+import os
+from pathlib import Path
 import json
 import time
 from typing import List, Optional, Tuple, Any, Dict
@@ -442,6 +444,12 @@ class RollingForecast(ForecastingStrategy):
 
         all_predicts = np.concatenate(all_predicts, axis=0)
         targets = batch_maker.make_batch_eval(horizon)["target"]
+        archive = os.environ.get("PHOCONET_PREDICTIONS_PATH")
+        if archive:
+            destination = Path(archive)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(destination, actual=targets, predicted=all_predicts,
+                                origins=np.asarray(index_list, dtype=np.int64))
         if len(targets) != len(all_predicts):
             raise RuntimeError("Predictions' len don't equal targets' len!")
 

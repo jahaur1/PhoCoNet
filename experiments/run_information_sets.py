@@ -17,13 +17,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from experiments.paths import RESULT_ROOT
 from experiments import information_value_core as base
 from experiments.information_value_normalization import QNormControlledModel
 from ts_benchmark.baselines.phoconet.models.phoconet import (
     Model as PhoCoNetModel,
 )
 
-OUTPUT = ROOT / "result" / "phoconet_information_sets"
+OUTPUT = RESULT_ROOT / "phoconet_information_sets"
 
 
 def model_config(channels: int, history: int, horizon: int, width: int):
@@ -99,7 +100,7 @@ def summarize(rows: list[dict], output: Path) -> None:
         for row in frame.itertuples(index=False)
     }
     paired_rows = []
-    for station in base.STATIONS:
+    for station in frame.station.unique():
         for seed in sorted(frame.seed.unique()):
             for contrast, (before, after) in base.CONTRASTS.items():
                 left = indexed[station, int(seed), before]
@@ -143,7 +144,7 @@ def summarize(rows: list[dict], output: Path) -> None:
         "| Station | Information | MSE | MAE | RMSE |",
         "|---|---|---:|---:|---:|",
     ]
-    for station in base.STATIONS:
+    for station in frame.station.unique():
         subset = frame.loc[frame.station.eq(station)]
         for condition in base.CONDITIONS:
             group = subset.loc[subset.condition.eq(condition)]

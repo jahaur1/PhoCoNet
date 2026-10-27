@@ -29,7 +29,9 @@ import csv
 import hashlib
 import json
 import math
+import os
 import statistics
+import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -37,6 +39,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from experiments.paths import RESULT_ROOT
 from experiments.config import (
     BASE_PARAMS as PHOCONET_BASE_PARAMS,
     DATASETS,
@@ -48,7 +51,6 @@ from experiments.config import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-RESULT_ROOT = ROOT / "result"
 SAVE_FAMILY = "phoconet_sensor_noise"
 OUTPUT_DIR = RESULT_ROOT / SAVE_FAMILY
 TP_CHANNEL = TARGET_CHANNEL
@@ -153,7 +155,7 @@ def parse_report(report_path: Path) -> dict[str, float] | None:
             metrics[row[1]] = float(row[2])
         except ValueError:
             return None
-    return metrics if all(metric in metrics for metric in REQUIRED_METRICS) else None
+    return metrics if all(metric in metrics and math.isfinite(metrics[metric]) for metric in REQUIRED_METRICS) else None
 
 
 def latest_valid_report(
@@ -229,7 +231,7 @@ def build_command(
 
     strategy_args = {"horizon": horizon, "target_channel": [TP_CHANNEL]}
     save_path = condition_dir(model, dataset, snr_db, noise_seed).relative_to(
-        RESULT_ROOT
+        ROOT / "result"
     )
     runner = model_config.get("runner", "scripts/run_benchmark.py")
 
@@ -262,7 +264,7 @@ def build_command(
         "--seed",
         str(train_seed),
         "--save-true-pred",
-        "false",
+        "true",
         "--deterministic",
         "full",
     ])
@@ -284,6 +286,8 @@ def run_condition(
     dry_run: bool,
 ) -> bool:
     existing = latest_valid_report(model, dataset, snr_db, noise_seed)
+    if not (condition_dir(model, dataset, snr_db, noise_seed) / "predictions.npz").is_file():
+        existing = None
     label = f"{model}/{dataset}/SNR={snr_db:g}dB/noise_seed={noise_seed}"
     if existing is not None and not force:
         print(f"[skip] {label}: {existing.name}", flush=True)
@@ -306,7 +310,15 @@ def run_condition(
         print("      " + subprocess.list2cmdline(command), flush=True)
         return True
 
-    completed = subprocess.run(command, cwd=ROOT, check=False)
+    params = json.loads(command[command.index("--model-hyper-params") + 1])
+    cache = Path(params["robustness_checkpoint_cache"])
+    main_checkpoint = RESULT_ROOT / "phoconet_main" / dataset / f"h{horizon}" / f"seed_{train_seed}" / "checkpoint.pt"
+    if not cache.exists() and main_checkpoint.is_file():
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(main_checkpoint, cache)
+        print(f"[checkpoint] copied main checkpoint: {main_checkpoint}", flush=True)
+    environment = {**os.environ, "PHOCONET_PREDICTIONS_PATH": str(condition_dir(model, dataset, snr_db, noise_seed) / "predictions.npz")}
+    completed = subprocess.run(command, cwd=ROOT, env=environment, check=False)
     if completed.returncode != 0:
         print(f"[failed] {label}: exit code {completed.returncode}", flush=True)
         return False

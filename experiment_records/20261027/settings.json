@@ -1,0 +1,34 @@
+{
+  "model": "PhoCoNet",
+  "history": 96,
+  "horizon": 24,
+  "seed": 2021,
+  "stations": [
+    "juzizhou",
+    "sanjiaozhou",
+    "laodaohe"
+  ],
+  "epochs_max": 100,
+  "patience": 10,
+  "noise_snr_db": [
+    100,
+    50,
+    30,
+    20,
+    10,
+    5,
+    0
+  ],
+  "noise_seed": 20210726,
+  "missing_rates": [
+    0,
+    0.1,
+    0.3,
+    0.5,
+    0.7
+  ],
+  "missing_masks": 10,
+  "shap_windows_per_station": 435,
+  "shap_backgrounds": 8,
+  "shap_integration_steps": 16
+}

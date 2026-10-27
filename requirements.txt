@@ -4,7 +4,7 @@ numpy<2
 pandas<3
 scikit-learn
 scipy
-shap<0.47
+shap>=0.44,<0.50
 torch
 dash
 dash-bootstrap-components

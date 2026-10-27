@@ -1,7 +1,7 @@
 """Generate final-model GradientSHAP figures for PhoCoNet.
 
-The script retrains the frozen final configuration with deterministic seed
-2021, restores the validation-selected checkpoint, and verifies its complete
+The script loads the frozen seed-2021 validation-selected checkpoint,
+refits training-only scalers, and verifies its complete
 test prediction array against the archived main experiment before computing
 attributions.  Attributions use multi-baseline expected gradients with
 Gauss--Legendre integration, a GradientSHAP approximation.  Calendar markers
@@ -30,6 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from experiments.paths import RESULT_ROOT
 from experiments.config import DATASETS
 from experiments.run_main import (
     params_for as final_params_for,
@@ -42,8 +43,8 @@ from ts_benchmark.data.utils import read_data
 from ts_benchmark.utils.random_utils import fix_all_random_seed
 
 
-OUTPUT = ROOT / "result" / "phoconet_shap_seed2021"
-MAIN_RESULT = ROOT / "result" / "phoconet_main"
+OUTPUT = RESULT_ROOT / "phoconet_shap_seed2021"
+MAIN_RESULT = RESULT_ROOT / "phoconet_main"
 HISTORY = 96
 HORIZON = 24
 SEED = 2021
@@ -507,7 +508,7 @@ def run_station(
     out = OUTPUT / station
     out.mkdir(parents=True, exist_ok=True)
     candidates = sorted(
-        (ROOT / "result/phoconet_sensor_noise/model_cache/PhoCoNet" / station).glob(
+        (RESULT_ROOT / "phoconet_sensor_noise" / "model_cache" / "PhoCoNet" / station).glob(
             f"h{HORIZON}_seed{SEED}_*.pt"
         )
     )
@@ -516,7 +517,7 @@ def run_station(
             f"Expected one frozen PhoCoNet checkpoint for {station}, found {len(candidates)}"
         )
     checkpoint = candidates[0]
-    print(f"[train] {station}", flush=True)
+    print(f"[load frozen checkpoint] {station}", flush=True)
     started = time.time()
     model, series, target_cols, exog_cols = train_final(station, checkpoint, num_epochs)
     verification = verify_against_main(station, model, series, target_cols, exog_cols)
@@ -658,13 +659,14 @@ def cross_station(frames: list[pd.DataFrame]) -> None:
         "sanjiaozhou": "三角洲",
         "laodaohe": "捞刀河",
     }
-    regular_font = FontProperties(fname=r"C:\Windows\Fonts\msyh.ttc", size=12)
-    bold_font = FontProperties(fname=r"C:\Windows\Fonts\msyhbd.ttc", size=12)
-    title_font = FontProperties(fname=r"C:\Windows\Fonts\msyhbd.ttc", size=16)
-    note_font = FontProperties(fname=r"C:\Windows\Fonts\msyh.ttc", size=9)
+    has_cjk = Path(r"C:\Windows\Fonts\msyh.ttc").is_file()
+    regular_font = FontProperties(fname=r"C:\Windows\Fonts\msyh.ttc", size=12) if has_cjk else FontProperties(size=12)
+    bold_font = FontProperties(fname=r"C:\Windows\Fonts\msyhbd.ttc", size=12) if has_cjk else FontProperties(size=12, weight="bold")
+    title_font = FontProperties(fname=r"C:\Windows\Fonts\msyhbd.ttc", size=16) if has_cjk else FontProperties(size=16, weight="bold")
+    note_font = FontProperties(fname=r"C:\Windows\Fonts\msyh.ttc", size=9) if has_cjk else FontProperties(size=9)
     table_rows = [
         [
-            chinese_names.get(station, station),
+            chinese_names.get(station, station) if has_cjk else station,
             f"{sources.loc[station, 'history_share']:.1%}",
             f"{sources.loc[station, 'online_share']:.1%}",
         ]
@@ -675,7 +677,7 @@ def cross_station(frames: list[pd.DataFrame]) -> None:
     ax.axis("off")
     table = ax.table(
         cellText=table_rows,
-        colLabels=["数据集", "历史信息占比", "在线窗口占比"],
+        colLabels=["数据集", "历史信息占比", "在线窗口占比"] if has_cjk else ["Station", "History share", "Online share"],
         cellLoc="center",
         colLoc="center",
         colWidths=[0.28, 0.36, 0.36],
@@ -704,11 +706,11 @@ def cross_station(frames: list[pd.DataFrame]) -> None:
                 cell.get_text().set_color(ONLINE_COLOR)
                 cell.get_text().set_fontproperties(bold_font)
 
-    fig.text(0.5, 0.90, "信息来源贡献占比", ha="center", va="center", fontproperties=title_font)
+    fig.text(0.5, 0.90, "信息来源贡献占比" if has_cjk else "Attribution by source", ha="center", va="center", fontproperties=title_font)
     fig.text(
         0.5,
         0.08,
-        "注：占比基于全部 435 个测试窗口的绝对 GradientSHAP 归因总量。",
+        "注：占比基于各站点所解释测试窗口的绝对 GradientSHAP 归因总量。" if has_cjk else "Absolute GradientSHAP mass across explained test windows.",
         ha="center",
         va="center",
         color="#667085",

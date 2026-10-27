@@ -3,7 +3,6 @@ from typing import Optional, List, Callable, Tuple, NoReturn, Union
 
 from ts_benchmark.utils.design_pattern import Singleton
 from ts_benchmark.utils.parallel.base import TaskResult, SharedStorage
-from ts_benchmark.utils.parallel.ray_backend import RayBackend
 from ts_benchmark.utils.parallel.sequential_backend import SequentialBackend
 
 
@@ -13,7 +12,6 @@ __all__ = ["ParallelBackend", "SharedStorage"]
 class ParallelBackend(metaclass=Singleton):
     #: all available backends
     BACKEND_DICT = {
-        "ray": RayBackend,
         "sequential": SequentialBackend,
     }
 
@@ -31,6 +29,9 @@ class ParallelBackend(metaclass=Singleton):
         max_tasks_per_child: Optional[int] = None,
         worker_initializers: Optional[Union[List[Callable], Callable]] = None,
     ):
+        if backend == "ray" and backend not in self.BACKEND_DICT:
+            from ts_benchmark.utils.parallel.ray_backend import RayBackend
+            self.BACKEND_DICT["ray"] = RayBackend
         if backend not in self.BACKEND_DICT:
             raise ValueError(f"Unknown backend name {backend}")
         if self.backend is not None:
