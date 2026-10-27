@@ -2,7 +2,7 @@ param(
     [string]$Python = "python",
     [string]$RunId = "phoconet_20261027",
     [ValidateSet("formal", "smoke")][string]$Profile = "formal",
-    [string[]]$Stages = @("main", "noise", "missingness", "shap", "information"),
+    [string[]]$Stages = @("main", "noise", "missingness", "shap"),
     [int]$Gpu = 0,
     [switch]$Execute,
     [switch]$PrepareOnly

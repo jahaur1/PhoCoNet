@@ -20,7 +20,7 @@ import torch
 from experiments.paths import RESULT_ROOT
 from experiments.config import DATASETS
 from experiments.run_main import params_for
-from experiments.information_value_core import AUXILIARIES, load_frame
+from experiments.data_utils import AUXILIARIES, load_frame
 from ts_benchmark.baselines.phoconet.phoconet import (
     PhoCoNet,
 )

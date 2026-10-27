@@ -16,8 +16,8 @@ import sys
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-STAGES = ("main", "noise", "missingness", "shap", "information")
-MODULES = dict(zip(STAGES, ("run_main", "run_sensor_noise", "run_history_tp_missingness", "run_shap", "run_information_sets")))
+STAGES = ("main", "noise", "missingness", "shap")
+MODULES = dict(zip(STAGES, ("run_main", "run_sensor_noise", "run_history_tp_missingness", "run_shap")))
 
 def utc():
     return datetime.now(timezone.utc).isoformat()
@@ -33,9 +33,12 @@ def write_json(path, value):
 
 def source_files():
     files = []
-    for directory in ("experiments", "ts_benchmark", "scripts", "config", "tests", "experiment_records"):
-        files.extend(p for p in (ROOT / directory).rglob("*") if p.is_file() and "__pycache__" not in p.parts and p.suffix in {".py", ".json", ".md", ".csv", ".sh", ".ps1"})
-    files.extend(p for p in ROOT.iterdir() if p.is_file() and (p.suffix in {".py", ".md", ".txt", ".ps1"} or p.name in {"LICENSE", ".gitignore"}))
+    for directory in ("ts_benchmark", "scripts", "config", "experiment_records"):
+        files.extend(p for p in (ROOT / directory).rglob("*") if p.is_file() and "__pycache__" not in p.parts and "synchronous_soft_sensor" not in p.parts and p.name not in {"q_only.csv", "q_only_summary.csv"} and p.suffix in {".py", ".json", ".md", ".csv", ".sh", ".ps1"})
+    files.extend(ROOT / "experiments" / name for name in ("__init__.py", "config.py", "data_utils.py", "paths.py", "preflight.py", "run_main.py", "run_sensor_noise.py", "run_history_tp_missingness.py", "run_shap.py", "run_suite.py"))
+    files.extend(ROOT / "tests" / name for name in ("test_phoconet.py", "test_model_names.py", "test_pipeline.py"))
+    files.extend(ROOT / name for name in ("README.md", "EXPERIMENTS.md", "LICENSE", ".gitignore", "requirements.txt", "Run_PhoCoNet.py", "Run_All_PhoCoNet.ps1"))
+    files = [p for p in files if p.is_file()]
     return sorted(set(files))
 
 def commands(args):
@@ -43,13 +46,11 @@ def commands(args):
     result = {stage: prefix + ["experiments." + MODULES[stage]] for stage in STAGES}
     result["main"] += ["--gpu", str(args.gpu)]
     result["noise"] += ["--gpus", str(args.gpu)]
-    result["information"] += ["--device", "cuda:0"]
     if args.profile == "smoke":
         result["main"] += ["--horizons", "24", "--seeds", "2021", "--epochs", "1"]
         result["noise"] += ["--snr-db", "100", "--num-epochs", "1"]
         result["missingness"] += ["--rates", "0", "0.3", "--mask-repetitions", "1"]
         result["shap"] += ["--num-windows", "2", "--background-count", "2", "--integration-steps", "2", "--num-epochs", "1"]
-        result["information"] += ["--seeds", "2021", "--epochs", "1"]
     return result
 
 def require_dependencies(stage, selected, state, output):
@@ -96,10 +97,6 @@ def verify_stage(stage, output, profile):
                 raise RuntimeError("SHAP checkpoint verification failed")
             if metadata["equivalent_forward_max_abs_difference"] > 1e-6:
                 raise RuntimeError("SHAP graph differs from production")
-    elif stage == "information":
-        expected = 75 if profile == "formal" else 15
-        if count(output / "phoconet_information_sets" / "metrics_by_run.csv") != expected:
-            raise RuntimeError("Incomplete information matrix")
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

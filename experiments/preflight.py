@@ -13,10 +13,10 @@ def check() -> dict:
         module = importlib.import_module(name)
         versions[name] = str(getattr(module, "__version__", "unknown"))
     from experiments.config import DATASETS, TARGET_CHANNEL
-    from experiments.information_value_core import AUXILIARIES, load_frame
+    from experiments.data_utils import AUXILIARIES, load_frame
     from experiments.paths import ROOT
     from ts_benchmark.data.utils import read_data
-    from experiments import run_main, run_sensor_noise, run_history_tp_missingness, run_shap, run_information_sets
+    from experiments import run_main, run_sensor_noise, run_history_tp_missingness, run_shap
     import torch
     from ts_benchmark.data.data_source import LocalForecastingDataSource
     source = LocalForecastingDataSource()
