@@ -203,9 +203,12 @@ class Model(IsolatedJointModel):
         x_enc: torch.Tensor,
         x_mark_enc: torch.Tensor | None = None,
         exog_future: torch.Tensor | None = None,
+        *,
+        include_auxiliary_predictions: bool = False,
     ) -> torch.Tensor:
         prediction = super(PhoCoNetQModel, self).forecast(
-            x_enc, x_mark_enc, exog_future
+            x_enc, x_mark_enc, exog_future,
+            include_auxiliary_predictions=include_auxiliary_predictions,
         )
         correction = self.q_correction(x_enc, exog_future, prediction)
         prediction = prediction.clone()

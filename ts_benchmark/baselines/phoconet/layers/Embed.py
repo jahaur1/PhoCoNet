@@ -15,8 +15,8 @@ class PatchEmbed(nn.Module):
             nn.Dropout(configs.dropout),
         )
 
-    def forward(self, values, time_markers):
-        combined = torch.cat([values, time_markers], dim=-1)
+    def forward(self, values, time_markers=None):
+        combined = values if time_markers is None else torch.cat((values, time_markers), dim=-1)
         combined = combined.transpose(-1, -2)
         patches = combined.unfold(
             dimension=-1,

@@ -937,6 +937,10 @@ class DeepForecastingModelBase(ModelBase):
 
         return answers[..., :series_dim]
 
+    def _process_rolling_feedback(self, input, target, input_mark, target_mark, exog_future):
+        """Produce the next input block when another forecast block follows."""
+        return self._process(input, target, input_mark, target_mark, exog_future)
+
     def _perform_rolling_predictions(
         self,
         horizon: int,
@@ -993,7 +997,9 @@ class DeepForecastingModelBase(ModelBase):
                     ]
                 else:
                     exog_future1 = None
-                out_loss = self._process(
+                has_next_block = (rolling_time + 1) * self.config.horizon < horizon
+                process = self._process_rolling_feedback if has_next_block else self._process
+                out_loss = process(
                     input, dec_input, input_mark, target_mark, exog_future1
                 )
                 output = out_loss["output"]
@@ -1014,7 +1020,7 @@ class DeepForecastingModelBase(ModelBase):
                         :, -self.config.horizon :, :
                     ]
                 )
-                answers.append(answer)
+                answers.append(answer[..., :series_dim])
                 if sum(a.shape[1] for a in answers) >= horizon:
                     break
                 rolling_time += 1

@@ -20,8 +20,8 @@ class Model(IsolatedLateModel):
         for module in (self.q_feature_norm, self.q_delta, self.q_gate):
             for parameter in module.parameters():
                 parameter.requires_grad_(True)
-        for parameter in self.late_interaction.parameters():
-            parameter.requires_grad_(False)
+        if self.late_interaction is not None:
+            self.late_interaction.requires_grad_(False)
 
     def forecast(
         self,

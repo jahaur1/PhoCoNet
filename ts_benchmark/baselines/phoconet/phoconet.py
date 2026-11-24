@@ -155,5 +155,15 @@ class PhoCoNet(PhoCoNet2):
             self.config.input_dim = 1
         return Model(self.config)
 
+    def _process_rolling_feedback(self, input, target, input_mark, target_mark, exog_future):
+        if self.model.target_only_dpf and input.shape[-1] > self.config.series_dim:
+            output = self.model.forecast(
+                input, input_mark, exog_future, include_auxiliary_predictions=True
+            )
+            return {"output": output}
+        return super()._process_rolling_feedback(
+            input, target, input_mark, target_mark, exog_future
+        )
+
 
 __all__ = ["PhoCoNet", "PhoCoNet2", "MODEL_HYPER_PARAMS", "PHOCONET2_HYPER_PARAMS"]

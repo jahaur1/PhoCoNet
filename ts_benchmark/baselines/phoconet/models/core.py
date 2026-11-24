@@ -383,15 +383,8 @@ class Model(nn.Module):
     def _refine_encoded_channels(self, enc_out):
         return enc_out
 
-    def forecast(self, x_enc, x_mark_enc=None, exog_future=None):
-        if x_mark_enc is None:
-            x_mark_enc = torch.zeros(
-                (*x_enc.shape[:-1], 4),
-                device=x_enc.device, dtype=x_enc.dtype,
-            )
-
-        original_c_in = x_enc.shape[-1]
-
+    def forecast(self, x_enc, x_mark_enc=None, exog_future=None, *,
+                 include_auxiliary_predictions=False, detach_revin=True):
         if not self.use_future_exog:
             exog_future = None
 
@@ -446,9 +439,17 @@ class Model(nn.Module):
                     gen=gen,
                 )
 
+        if getattr(self, "target_only_dpf", False) and not include_auxiliary_predictions:
+            x_enc = x_enc[..., :self.target_channels]
+            x_mark_enc = None
+        elif x_mark_enc is None:
+            x_mark_enc = x_enc.new_zeros((*x_enc.shape[:-1], 4))
+
         if self.revin:
-            mean = x_enc.mean(dim=1, keepdim=True).detach()
-            std = torch.sqrt(x_enc.var(dim=1, keepdim=True, unbiased=False) + 1e-5).detach()
+            mean = x_enc.mean(dim=1, keepdim=True)
+            std = torch.sqrt(x_enc.var(dim=1, keepdim=True, unbiased=False) + 1e-5)
+            if detach_revin:
+                mean, std = mean.detach(), std.detach()
             x_enc_norm = (x_enc - mean) / std
         else:
             mean = std = None

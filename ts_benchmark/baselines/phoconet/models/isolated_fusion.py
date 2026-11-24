@@ -28,24 +28,25 @@ class Model(PhoCoNetQModel):
             for parameter in module.parameters():
                 parameter.requires_grad_(False)
         with torch.random.fork_rng(devices=[]):
-            self.late_interaction = TargetConditionedLateInteraction(
-                sequence_length=self.seq_len,
-                horizon=self.pred_len,
-                variable_count=self.q_exog_dim,
-                target_channels=self.target_channels,
-                interaction_dim=int(getattr(configs, "late_dim", 32)),
-                num_heads=int(getattr(configs, "late_heads", 4)),
-                hidden_dim=int(getattr(configs, "late_hidden", 32)),
-                output_scale=float(
-                    getattr(configs, "late_output_scale", 1e-2)
-                ),
-                gate_init=float(getattr(configs, "late_gate_init", 0.1)),
-                use_auxiliary_prediction=True,
-            )
+            self.late_interaction = self._build_late_interaction(configs)
 
         # These modules are created lazily with the other fusion components.
         self.isolated_local_gate: nn.Module | None = None
         self.isolated_future_projection: nn.Module | None = None
+
+    def _build_late_interaction(self, configs):
+        return TargetConditionedLateInteraction(
+            sequence_length=self.seq_len,
+            horizon=self.pred_len,
+            variable_count=self.q_exog_dim,
+            target_channels=self.target_channels,
+            interaction_dim=int(getattr(configs, "late_dim", 32)),
+            num_heads=int(getattr(configs, "late_heads", 4)),
+            hidden_dim=int(getattr(configs, "late_hidden", 32)),
+            output_scale=float(getattr(configs, "late_output_scale", 1e-2)),
+            gate_init=float(getattr(configs, "late_gate_init", 0.1)),
+            use_auxiliary_prediction=True,
+        )
 
     def init_fusion_components(self, exog_dim: int, alpha_init: float = 0.0):
         """Create only variable-wise fusion; no layer receives the full Q vector."""
@@ -182,10 +183,12 @@ class Model(PhoCoNetQModel):
         return prediction
 
     def get_late_attention(self) -> torch.Tensor | None:
-        return self.late_interaction.get_last_attention()
+        if self.late_interaction is not None:
+            return self.late_interaction.get_last_attention()
 
     def get_late_gate(self) -> torch.Tensor | None:
-        return self.late_interaction.get_last_gate()
+        if self.late_interaction is not None:
+            return self.late_interaction.get_last_gate()
 
 
 __all__ = ["Model"]

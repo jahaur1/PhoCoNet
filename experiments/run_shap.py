@@ -38,6 +38,7 @@ from experiments.run_main import (
 from ts_benchmark.baselines.phoconet.phoconet import (
     PhoCoNet,
 )
+from ts_benchmark.baselines.phoconet.models.core import Model as PhoCoNetBackbone
 from ts_benchmark.baselines.utils import get_time_mark
 from ts_benchmark.data.utils import read_data
 from ts_benchmark.utils.random_utils import fix_all_random_seed
@@ -128,64 +129,13 @@ def differentiable_forward(
     path derivative required by integrated/expected gradients.  This equivalent
     graph retains those derivatives only for attribution.
     """
-    original_history = history
-    if not module.use_future_exog:
-        future_exog = None
     if module.future_exog_mode != "normal":
         raise ValueError("final GradientSHAP requires future_exog_mode='normal'")
-    history = module._remove_history_target(history)
-    history = module._remove_history_exog(history)
-    series_dim = int(getattr(module.configs, "series_dim", 1))
-    history = module._mask_exog_columns(history, base_offset=series_dim, which="history")
-    future_exog = module._mask_exog_columns(
-        future_exog, base_offset=0, which="future"
+    prediction = PhoCoNetBackbone.forecast(
+        module, history, marks, future_exog, detach_revin=False
     )
-
-    if module.revin:
-        mean = history.mean(dim=1, keepdim=True)
-        std = torch.sqrt(history.var(dim=1, keepdim=True, unbiased=False) + 1e-5)
-        normalized = (history - mean) / std
-    else:
-        mean = std = None
-        normalized = history
-
-    base_embedding = module.patch_embed(normalized, marks)
-    if module.fusion_mode == "dual":
-        local = module._path1_gated_overwrite(normalized.clone(), future_exog)
-        local_embedding = module.patch_embed(local, marks)
-        global_embedding = module._path2_embedding_enhance(
-            base_embedding, future_exog
-        )
-        if module.alpha_mode == "fixed":
-            alpha = module.alpha_fixed
-        elif module.fusion_alpha_logit is not None:
-            alpha = torch.sigmoid(module.fusion_alpha_logit)
-        else:
-            alpha = 0.5
-        embedding = alpha * local_embedding + (1.0 - alpha) * global_embedding
-    elif module.fusion_mode == "only_overwrite":
-        local = module._path1_gated_overwrite(normalized.clone(), future_exog)
-        embedding = module.patch_embed(local, marks)
-    elif module.fusion_mode == "only_embedding":
-        embedding = module._path2_embedding_enhance(base_embedding, future_exog)
-    else:
-        raise ValueError(f"unsupported final-Q fusion mode: {module.fusion_mode}")
-
-    if module.attn_mode == "none":
-        encoded = embedding
-    elif module.attn_mode == "parallel":
-        encoded = (
-            module.temporal_encoder(embedding)[0]
-            + module.covariate_encoder(embedding)[0]
-        ) / 2.0
-    else:
-        encoded = module.encoder(embedding)[0]
-    encoded = module._refine_encoded_channels(encoded[:, : module.c_in])
-    prediction = module.decoder(encoded).transpose(-1, -2)
-    if module.revin:
-        prediction = prediction * std + mean
     prediction = prediction[:, -module.pred_len :, :]
-    correction = module.q_correction(original_history, future_exog, prediction)
+    correction = module.q_correction(history, future_exog, prediction)
     target_channels = module.target_channels
     return torch.cat(
         (
